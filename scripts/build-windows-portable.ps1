@@ -32,6 +32,7 @@ try {
         'README.ko.md',
         'README.zh-CN.md',
         'README.zh-TW.md',
+		'CHANGELOG.md',
         'LICENSE.txt',
         'THIRD_PARTY_NOTICES.txt',
         'DISCLAIMER.txt',

@@ -4,7 +4,7 @@
 
 Samsung FUS CLI는 Windows 및 macOS에서 실행되는 비공식 독립 명령줄 삼성 펌웨어 다운로드 도구입니다. Samsung의 공식 제품이 아니며 Samsung과 제휴하거나 승인을 받은 제품이 아닙니다. Samsung FUS에서 공식 Galaxy 펌웨어를 다운로드하고, `.enc4` 파일을 복호화하며, 중단된 다운로드를 재개하고, 파일 크기·CRC32·SHA-256을 확인합니다. Go 단일 실행 파일이므로 실행할 때 Python이 필요하지 않습니다.
 
-IMEI, 일련번호, 전화번호, Samsung 계정 또는 ADB 연결을 사용하지 않습니다. PC로 파일을 받는 기능만 제공하며 기기 플래시, 부트로더 잠금 해제 또는 루팅은 수행하지 않습니다.
+현재 Samsung Smart Download API에서는 IMEI나 일련번호를 사용하지 않습니다. 구형 기기의 레거시 FUS가 식별자를 요구할 때만 `--device-id-file`로 본인 기기의 IMEI 또는 일련번호를 읽을 수 있습니다. 값은 화면, JSON 또는 설정에 저장되지 않습니다. PC로 파일을 받는 기능만 제공하며 기기 플래시, 부트로더 잠금 해제 또는 루팅은 수행하지 않습니다.
 
 ## 사용 책임
 
@@ -14,6 +14,8 @@ IMEI, 일련번호, 전화번호, Samsung 계정 또는 ADB 연결을 사용하�
 samsung-fus-cli check --model SM-S948Q --csc SJP --build BZI9
 samsung-fus-cli download --model SM-S948Q --csc SJP --build BZI9
 ```
+
+최신 버전 확인: `samsung-fus-cli check --model SC-51Aa --csc DCM --latest`. 레거시 FUS가 `408`을 반환하면 개인 파일에 본인 기기 식별자를 넣고 `--device-id-file PATH`를 사용하십시오. 파일을 Git이나 버그 보고서에 포함하거나 다른 기기의 식별자 및 생성한 IMEI를 사용하지 마십시오.
 
 같은 명령을 다시 실행하면 서버가 지원하는 경우 이어받습니다. 자세한 빌드 방법과 라이선스는 [일본어 README](README.md)를 참조하세요.
 

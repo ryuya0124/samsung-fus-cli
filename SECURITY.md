@@ -2,7 +2,7 @@
 
 ## Sensitive information
 
-Samsung FUS CLI does not need an IMEI, serial number, phone number, Samsung account, or ADB connection. Do not add those values to bug reports, screenshots, terminal transcripts, test fixtures, or sample commands.
+Samsung FUS CLI does not need an IMEI or serial for the current Smart Download API. Some legacy FUS devices require one through `--device-id-file`; the value is never logged or saved by the application. Never add identifiers to bug reports, screenshots, terminal transcripts, test fixtures, or sample commands.
 
 Before sharing `download-report.json`, review local file paths because they can contain an operating-system account name. Firmware files are large copyrighted binaries and should not be attached to ordinary bug reports.
 

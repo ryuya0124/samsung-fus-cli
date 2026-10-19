@@ -23,7 +23,7 @@ func (c *fusClient) download(ctx context.Context, o options, m metadata) (downlo
 	name := m.Fields["BINARY_NAME"]
 	modelPath := m.Fields["MODEL_PATH"]
 	deviceType := m.Fields["DEVICE_MODEL_TYPE"]
-	if name == "" || modelPath == "" || deviceType == "" {
+	if name == "" || modelPath == "" || (!m.Legacy && deviceType == "") {
 		return downloadReport{}, errors.New("FUS response is missing download fields")
 	}
 	if filepath.Base(name) != name || strings.ContainsAny(name, `/\\`) {
@@ -47,7 +47,7 @@ func (c *fusClient) download(ctx context.Context, o options, m metadata) (downlo
 		return downloadReport{}, err
 	}
 	encryptedPath := filepath.Join(destination, name)
-	if err := c.downloadFile(ctx, modelPath+name, encryptedPath, expectedSize); err != nil {
+	if err := c.downloadFile(ctx, modelPath+name, encryptedPath, expectedSize, m.Legacy); err != nil {
 		return downloadReport{}, err
 	}
 
@@ -66,7 +66,7 @@ func (c *fusClient) download(ctx context.Context, o options, m metadata) (downlo
 	return report, nil
 }
 
-func (c *fusClient) downloadFile(ctx context.Context, remotePath, localPath string, expectedSize int64) error {
+func (c *fusClient) downloadFile(ctx context.Context, remotePath, localPath string, expectedSize int64, legacy bool) error {
 	var offset int64
 	if stat, err := os.Stat(localPath); err == nil {
 		offset = stat.Size()
@@ -81,7 +81,13 @@ func (c *fusClient) downloadFile(ctx context.Context, remotePath, localPath stri
 		return err
 	}
 
-	downloadURL, err := url.Parse(downloadBaseURL)
+	baseURL := downloadBaseURL
+	agent := userAgent
+	if legacy {
+		baseURL = legacyDownloadBaseURL
+		agent = "Kiss2.0_FUS"
+	}
+	downloadURL, err := url.Parse(baseURL)
 	if err != nil {
 		return err
 	}
@@ -93,7 +99,7 @@ func (c *fusClient) downloadFile(ctx context.Context, remotePath, localPath stri
 		return err
 	}
 	req.Header.Set("Authorization", c.authorization())
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", agent)
 	req.Header.Set("Cache-Control", "no-cache")
 	if offset > 0 {
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", offset))
@@ -190,7 +196,18 @@ func verifyAndDecrypt(encryptedPath, destination string, o options, m metadata, 
 
 	var block cipherBlock
 	if !o.noDecrypt {
-		key, err := decryptionKey(o.version, m.Fields["LOGIC_VALUE_FACTORY"])
+		logic := m.Fields["LOGIC_VALUE_FACTORY"]
+		if logic == "" {
+			logic = m.Fields["LOGIC_VALUE_HOME"]
+		}
+		keyVersion := m.Results["LATEST_FW_VERSION"]
+		if keyVersion == "" {
+			keyVersion = m.Results["BINARY_SW_VERSION"]
+		}
+		if keyVersion == "" {
+			keyVersion = o.version
+		}
+		key, err := decryptionKey(keyVersion, logic)
 		if err != nil {
 			return report, err
 		}

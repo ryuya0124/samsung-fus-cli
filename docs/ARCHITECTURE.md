@@ -13,7 +13,7 @@ The program uses only the Go standard library. Runtime behavior is split by resp
 
 1. The CLI validates the model, CSC, build, and full version before network access.
 2. The FUS client requests a short-lived nonce and derives the session signature locally.
-3. The metadata request sends an empty `DEVICE_SN_NUMBER`; no IMEI or account data is collected.
+3. Modern metadata requests send an empty `DEVICE_SN_NUMBER`. If legacy FUS requires an identifier, the user may provide one through a local file; it stays in memory, is sent only in `DEVICE_IMEI_PUSH`, and is excluded from output and reports.
 4. The server returns the package name, path, size, CRC32, and decryption logic value.
 5. The downloader resumes an existing `.enc4` only when the server accepts the byte range.
 6. Verification streams the package through SHA-256 and CRC32 without loading it into memory.

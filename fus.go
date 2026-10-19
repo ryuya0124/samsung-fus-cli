@@ -40,6 +40,7 @@ type metadata struct {
 	RequestedVersion string            `json:"requested_version"`
 	Fields           map[string]string `json:"fields"`
 	Results          map[string]string `json:"results"`
+	Legacy           bool              `json:"legacy_api,omitempty"`
 }
 
 type downloadReport struct {
@@ -91,6 +92,36 @@ type informMessage struct {
 	} `xml:"FUSBody"`
 }
 
+type legacyInformMessage struct {
+	XMLName xml.Name `xml:"FUSMsg"`
+	Header  struct {
+		ProtoVer string `xml:"ProtoVer"`
+	} `xml:"FUSHdr"`
+	Body struct {
+		Put struct {
+			ClientProduct  dataValue `xml:"CLIENT_PRODUCT"`
+			ClientVersion  dataValue `xml:"CLIENT_VERSION"`
+			DeviceIMEI     dataValue `xml:"DEVICE_IMEI_PUSH"`
+			DeviceVersion  dataValue `xml:"DEVICE_FW_VERSION"`
+			DeviceLocal    dataValue `xml:"DEVICE_LOCAL_CODE"`
+			DeviceAID      dataValue `xml:"DEVICE_AID_CODE"`
+			DeviceModel    dataValue `xml:"DEVICE_MODEL_NAME"`
+			Contents       dataValue `xml:"DEVICE_CONTENTS_DATA_VERSION"`
+			CSCVersion     dataValue `xml:"DEVICE_CSC_CODE2_VERSION"`
+			PDAVersion     dataValue `xml:"DEVICE_PDA_CODE1_VERSION"`
+			PhoneVersion   dataValue `xml:"DEVICE_PHONE_FONT_VERSION"`
+			AccessMode     dataValue `xml:"ACCESS_MODE"`
+			BinaryNature   dataValue `xml:"BINARY_NATURE"`
+			LogicCheck     dataValue `xml:"LOGIC_CHECK"`
+			ClientLanguage dataValue `xml:"CLIENT_LANGUAGE"`
+		} `xml:"Put"`
+		Get struct {
+			CmdID           string `xml:"CmdID"`
+			LatestFWVersion string `xml:"LATEST_FW_VERSION"`
+		} `xml:"Get"`
+	} `xml:"FUSBody"`
+}
+
 type initMessage struct {
 	XMLName xml.Name  `xml:"FUSMsg"`
 	Header  fusHeader `xml:"FUSHdr"`
@@ -106,7 +137,70 @@ type initMessage struct {
 	} `xml:"FUSBody"`
 }
 
+type versionInfo struct {
+	Firmware struct {
+		Model   string `xml:"model"`
+		CSC     string `xml:"cc"`
+		Version struct {
+			Latest string `xml:"latest"`
+		} `xml:"version"`
+	} `xml:"firmware"`
+}
+
+func (c *fusClient) latestVersion(ctx context.Context, o options) (string, error) {
+	endpoint := fmt.Sprintf("%s/%s/%s/version.xml", firmwareBaseURL, o.csc, o.model)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "Kies2.0_FUS")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("discover latest firmware: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("discover latest firmware: HTTP %d", resp.StatusCode)
+	}
+	var info versionInfo
+	if err := xml.NewDecoder(io.LimitReader(resp.Body, 1024*1024)).Decode(&info); err != nil {
+		return "", fmt.Errorf("parse version.xml: %w", err)
+	}
+	latest := strings.TrimSpace(info.Firmware.Version.Latest)
+	if latest == "" {
+		return "", errors.New("Samsung FOTA returned no latest version")
+	}
+	latest = normalizeLatestVersion(latest)
+	if err := validateVersion(latest); err != nil {
+		return "", fmt.Errorf("Samsung FOTA returned an invalid latest version: %w", err)
+	}
+	return latest, nil
+}
+
+func normalizeLatestVersion(value string) string {
+	parts := strings.Split(value, "/")
+	if len(parts) == 3 {
+		parts = append(parts, parts[0])
+	}
+	if len(parts) >= 3 && parts[2] == "" {
+		parts[2] = parts[0]
+	}
+	return strings.Join(parts, "/")
+}
+
 func (c *fusClient) query(ctx context.Context, o options) (metadata, error) {
+	m, err := c.queryModern(ctx, o)
+	if err != nil || m.Results["Status"] == "S00" || m.Results["Status"] == "200" {
+		return m, err
+	}
+	legacy, legacyErr := c.queryLegacy(ctx, o)
+	if legacyErr != nil {
+		return m, legacyErr
+	}
+	return legacy, nil
+}
+
+func (c *fusClient) queryModern(ctx context.Context, o options) (metadata, error) {
 	m := metadata{Model: o.model, CSC: o.csc, RequestedVersion: o.version}
 	if _, err := c.request(ctx, "NF_SmartDownloadGenerateNonce.do", nil, true); err != nil {
 		return m, fmt.Errorf("generate FUS nonce: %w", err)
@@ -134,7 +228,54 @@ func (c *fusClient) query(ctx context.Context, o options) (metadata, error) {
 	return m, err
 }
 
+func (c *fusClient) queryLegacy(ctx context.Context, o options) (metadata, error) {
+	m := metadata{Model: o.model, CSC: o.csc, RequestedVersion: o.version, Legacy: true}
+	if _, err := c.requestWithAgent(ctx, "NF_DownloadGenerateNonce.do", nil, true, "Kiss2.0_FUS"); err != nil {
+		return m, fmt.Errorf("generate legacy FUS nonce: %w", err)
+	}
+	legacyVersion := strings.ToUpper(o.version)
+	logic, err := logicCheck(legacyVersion, c.nonce)
+	if err != nil {
+		return m, err
+	}
+	parts := strings.Split(legacyVersion, "/")
+	if len(parts) != 4 {
+		return m, errors.New("legacy FUS requires a four-part firmware version")
+	}
+	msg := legacyInformMessage{}
+	msg.Header.ProtoVer = "1.0"
+	msg.Body.Put.ClientProduct = dv("Smart Switch")
+	msg.Body.Put.ClientVersion = dv("4.3.23123_1")
+	msg.Body.Put.DeviceIMEI = dv(o.deviceID)
+	msg.Body.Put.DeviceVersion = dv(legacyVersion)
+	msg.Body.Put.DeviceLocal = dv(o.csc)
+	msg.Body.Put.DeviceAID = dv(o.csc)
+	msg.Body.Put.DeviceModel = dv(o.model)
+	msg.Body.Put.Contents = dv(parts[3])
+	msg.Body.Put.CSCVersion = dv(parts[1])
+	msg.Body.Put.PDAVersion = dv(parts[0])
+	msg.Body.Put.PhoneVersion = dv(parts[2])
+	msg.Body.Put.AccessMode = dv("2")
+	msg.Body.Put.BinaryNature = dv("1")
+	msg.Body.Put.LogicCheck = dv(logic)
+	msg.Body.Put.ClientLanguage = dv("1033")
+	msg.Body.Get.CmdID = "2"
+	payload, err := xml.Marshal(msg)
+	if err != nil {
+		return m, err
+	}
+	body, err := c.requestWithAgent(ctx, "NF_DownloadBinaryInform.do", append([]byte(xml.Header), payload...), false, "Kiss2.0_FUS")
+	if err != nil {
+		return m, fmt.Errorf("query legacy firmware metadata: %w", err)
+	}
+	m.Fields, m.Results, err = parseFUSResponse(body)
+	return m, err
+}
+
 func (c *fusClient) initializeDownload(ctx context.Context, o options, m metadata) error {
+	if m.Legacy {
+		return c.initializeLegacyDownload(ctx, m)
+	}
 	name := m.Fields["BINARY_NAME"]
 	if len(name) < 25 {
 		return errors.New("FUS returned an invalid binary name")
@@ -158,13 +299,50 @@ func (c *fusClient) initializeDownload(ctx context.Context, o options, m metadat
 	return err
 }
 
+func (c *fusClient) initializeLegacyDownload(ctx context.Context, m metadata) error {
+	name := m.Fields["BINARY_NAME"]
+	stem := strings.SplitN(name, ".", 2)[0]
+	if len(stem) < 16 {
+		return errors.New("legacy FUS returned an invalid binary name")
+	}
+	check, err := logicCheck(stem[len(stem)-16:], c.nonce)
+	if err != nil {
+		return err
+	}
+	msg := struct {
+		XMLName xml.Name `xml:"FUSMsg"`
+		Header  struct {
+			ProtoVer string `xml:"ProtoVer"`
+		} `xml:"FUSHdr"`
+		Body struct {
+			Put struct {
+				BinaryName dataValue `xml:"BINARY_FILE_NAME"`
+				LogicCheck dataValue `xml:"LOGIC_CHECK"`
+			} `xml:"Put"`
+		} `xml:"FUSBody"`
+	}{}
+	msg.Header.ProtoVer = "1.0"
+	msg.Body.Put.BinaryName = dv(name)
+	msg.Body.Put.LogicCheck = dv(check)
+	payload, err := xml.Marshal(msg)
+	if err != nil {
+		return err
+	}
+	_, err = c.requestWithAgent(ctx, "NF_DownloadBinaryInitForMass.do", append([]byte(xml.Header), payload...), false, "Kiss2.0_FUS")
+	return err
+}
+
 func (c *fusClient) request(ctx context.Context, endpoint string, payload []byte, nonceRequest bool) ([]byte, error) {
+	return c.requestWithAgent(ctx, endpoint, payload, nonceRequest, userAgent)
+}
+
+func (c *fusClient) requestWithAgent(ctx context.Context, endpoint string, payload []byte, nonceRequest bool, agent string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, metadataBaseURL+endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Authorization", c.authorization())
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", agent)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, err

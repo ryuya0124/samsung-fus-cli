@@ -16,7 +16,7 @@ Samsung公式FUS配信サーバーからファームウェアを取得する、W
 
 本アプリが行うのはPCへのダウンロード、復号、整合性確認までです。端末への書き込み、root化、ブートローダー操作は行いません。取得したSamsungファームウェアの著作権はSamsungなど各権利者に帰属します。取得物の再配布は各権利者の条件に従ってください。
 
-IMEI、シリアル番号、電話番号、Samsungアカウント、ADB接続は使用しません。FUSにはモデル、CSC、ソフトウェア版とセッション用認証値だけを送ります。
+現行のSamsung Smart Download APIではIMEI、シリアル番号、電話番号、Samsungアカウント、ADB接続を使用しません。古い機種の旧FUS APIが端末識別子を要求した場合に限り、`--device-id-file`でIMEIまたはシリアルを指定できます。値はSamsungへの照会にだけ使い、画面、JSON、レポート、設定へ保存しません。
 
 ## 対応環境
 
@@ -51,6 +51,20 @@ samsung-fus-cli download --model SM-S948Q --csc SJP --build BZI9 --no-decrypt
 ```text
 samsung-fus-cli check --model SM-XXXXX --csc XXX --version AP/CSC/CP/DATA
 ```
+
+Samsung FOTAから最新版を自動取得する例:
+
+```text
+samsung-fus-cli check --model SC-51Aa --csc DCM --latest
+```
+
+SC-51Aaのような旧FUS対象機種では、Samsung側がIMEIまたはシリアルを必須にする場合があります。その場合は値だけを書いたローカルファイルを用意します。コマンドライン引数へ値を直接書かないため、シェル履歴やプロセス一覧へ露出しません。
+
+```text
+samsung-fus-cli download --model SC-51Aa --csc DCM --latest --device-id-file C:\private\device-id.txt
+```
+
+識別子ファイルをGitへ追加したり、不具合報告へ添付したりしないでください。処理後は安全に削除してください。別端末の識別子や自動生成した偽のIMEIは使用しないでください。
 
 ## 保存内容
 
