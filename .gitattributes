@@ -1,0 +1,15 @@
+* text=auto
+
+*.go text eol=lf
+*.mod text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.sh text eol=lf
+Fastfile text eol=lf
+Gemfile text eol=lf
+Gemfile.lock text eol=lf
+
+*.ps1 text eol=crlf
+*.dat binary

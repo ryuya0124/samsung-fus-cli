@@ -1,0 +1,94 @@
+require "fileutils"
+require "digest"
+
+default_platform(:mac)
+
+platform :mac do
+  desc "Build, Developer ID sign, package, notarize, staple, and verify the universal macOS CLI"
+  lane :release do |options|
+    project_root = File.expand_path("..", __dir__)
+    release_version = (options[:version] || ENV["VERSION"] || "0.1.0").to_s
+    unless release_version.match?(/\A[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?\z/)
+      UI.user_error!("version must be a semantic version such as 1.0.0")
+    end
+
+    application_identity = ENV["MAC_APPLICATION_IDENTITY"]
+    installer_identity = ENV["MAC_INSTALLER_IDENTITY"]
+    notary_profile = ENV["APPLE_NOTARY_KEYCHAIN_PROFILE"]
+    package_identifier = ENV.fetch("MAC_PACKAGE_IDENTIFIER", "dev.samsungfus.cli")
+
+    UI.user_error!("MAC_APPLICATION_IDENTITY is required") if application_identity.to_s.empty?
+    UI.user_error!("MAC_INSTALLER_IDENTITY is required") if installer_identity.to_s.empty?
+    UI.user_error!("APPLE_NOTARY_KEYCHAIN_PROFILE is required") if notary_profile.to_s.empty?
+
+    Dir.chdir(project_root) do
+      dist = File.join(project_root, "dist")
+      work = File.join(dist, "mac-work")
+      pkg_root = File.join(work, "pkgroot")
+      arm_binary = File.join(work, "samsung-fus-cli-arm64")
+      intel_binary = File.join(work, "samsung-fus-cli-amd64")
+      universal_binary = File.join(pkg_root, "usr", "local", "bin", "samsung-fus-cli")
+      docs_dir = File.join(pkg_root, "usr", "local", "share", "doc", "samsung-fus-cli")
+      uninstaller = File.join(pkg_root, "usr", "local", "bin", "samsung-fus-cli-uninstall")
+      package_path = File.join(dist, "samsung-fus-cli-#{release_version}-macos-universal.pkg")
+
+      FileUtils.rm_rf(work)
+      FileUtils.mkdir_p(File.dirname(universal_binary))
+      FileUtils.mkdir_p(docs_dir)
+      FileUtils.mkdir_p(dist)
+
+      sh("go", "test", "./...")
+      ldflags = "-s -w -X main.version=#{release_version}"
+      sh("env", "CGO_ENABLED=0", "GOOS=darwin", "GOARCH=arm64", "go", "build", "-trimpath", "-ldflags", ldflags, "-o", arm_binary, ".")
+      sh("env", "CGO_ENABLED=0", "GOOS=darwin", "GOARCH=amd64", "go", "build", "-trimpath", "-ldflags", ldflags, "-o", intel_binary, ".")
+      sh("lipo", "-create", arm_binary, intel_binary, "-output", universal_binary)
+      FileUtils.chmod(0o755, universal_binary)
+
+      sh(
+        "codesign", "--force", "--options", "runtime", "--timestamp",
+        "--sign", application_identity,
+        "--identifier", "#{package_identifier}.executable",
+        universal_binary
+      )
+      sh("codesign", "--verify", "--strict", "--verbose=2", universal_binary)
+      sh("lipo", "-archs", universal_binary)
+
+      %w[README.md README.en.md README.ko.md README.zh-CN.md README.zh-TW.md LICENSE.txt THIRD_PARTY_NOTICES.txt DISCLAIMER.txt SECURITY.md].each do |name|
+        FileUtils.cp(File.join(project_root, name), docs_dir)
+      end
+      FileUtils.cp(File.join(project_root, "docs", "ARCHITECTURE.md"), docs_dir)
+      uninstall_template = File.read(File.join(project_root, "packaging", "macos", "uninstall.sh.in"))
+      File.write(uninstaller, uninstall_template.gsub("__PACKAGE_IDENTIFIER__", package_identifier))
+      FileUtils.chmod(0o755, uninstaller)
+
+      FileUtils.rm_f(package_path)
+      sh(
+        "pkgbuild",
+        "--root", pkg_root,
+        "--identifier", package_identifier,
+        "--version", release_version,
+        "--install-location", "/",
+        "--ownership", "recommended",
+        "--sign", installer_identity,
+        package_path
+      )
+      sh("pkgutil", "--check-signature", package_path)
+
+      sh(
+        "xcrun", "notarytool", "submit", package_path,
+        "--keychain-profile", notary_profile,
+        "--wait"
+      )
+      sh("xcrun", "stapler", "staple", package_path)
+      sh("xcrun", "stapler", "validate", package_path)
+      sh("spctl", "--assess", "--type", "install", "--verbose=4", package_path)
+      sh("shasum", "-a", "256", package_path)
+      checksum = Digest::SHA256.file(package_path).hexdigest
+      File.write("#{package_path}.sha256", "#{checksum}  #{File.basename(package_path)}\n")
+
+      FileUtils.rm_rf(work)
+      UI.success("Signed and notarized package: #{package_path}")
+      UI.message("Uninstall with: samsung-fus-cli-uninstall")
+    end
+  end
+end

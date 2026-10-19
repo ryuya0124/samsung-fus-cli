@@ -1,0 +1,20 @@
+#!/bin/sh
+set -eu
+
+SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+SELF_PATH="$SELF_DIR/$(basename -- "$0")"
+
+if [ "$(id -u)" -ne 0 ]; then
+  exec sudo "$SELF_PATH" "$@"
+fi
+
+BIN_PATH="/usr/local/bin/samsung-fus-cli"
+DOC_PATH="/usr/local/share/doc/samsung-fus-cli"
+
+rm -f "$BIN_PATH"
+rm -rf "$DOC_PATH"
+pkgutil --forget "__PACKAGE_IDENTIFIER__" >/dev/null 2>&1 || true
+rm -f "$SELF_PATH"
+
+echo "Samsung FUS CLI was removed."
+echo "Downloaded firmware files were left untouched."

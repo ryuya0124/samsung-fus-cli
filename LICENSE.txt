@@ -1,0 +1,12 @@
+Copyright (c) 2026 the project owner. All rights reserved.
+
+No permission is granted to copy, modify, distribute, sublicense, or sell this
+project's original source code or compiled binaries without the copyright
+holder's permission.
+
+Third-party components retain their own licenses. See
+THIRD_PARTY_NOTICES.txt for their copyright and license terms.
+
+No trademark license is granted. Samsung, Galaxy, and related names remain
+the property of their respective owners. This project is not affiliated with
+or endorsed by Samsung.
